@@ -54,7 +54,7 @@ npx tauri build --no-bundle
 The unpacked executable is generated at:
 
 ```text
-src-tauri/target/release/app.exe
+src-tauri/target/release/studyflow.exe
 ```
 
 ## Building an MSI Installer

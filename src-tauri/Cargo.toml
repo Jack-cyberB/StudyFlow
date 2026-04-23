@@ -1,17 +1,17 @@
 [package]
-name = "app"
-version = "0.1.0"
+name = "studyflow"
+version = "1.0.0"
 description = "StudyFlow desktop study scheduler built with Tauri, React, and SQLite."
 authors = ["Zhang"]
 license = "MIT"
-repository = ""
+repository = "https://github.com/Jack-cyberB/StudyFlow"
 edition = "2021"
 rust-version = "1.77.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "app_lib"
+name = "studyflow_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
