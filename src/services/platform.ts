@@ -109,9 +109,21 @@ export const ensureNotificationPermission = async () => {
   return granted;
 };
 
-export const deliverNotification = (item: NotificationPlanItem) => {
+export interface NotificationActionPayload {
+  action: 'open' | 'complete' | 'delay' | 'customDelay';
+  eventId?: string;
+  date?: string;
+  minutes?: number;
+}
+
+export const deliverNotification = async (item: NotificationPlanItem) => {
+  if (isTauriApp) {
+    await invoke('show_studyflow_notification', { payload: item });
+    return;
+  }
+
   sendNotification({
-    title: item.title,
+    title: `StudyFlow | ${item.title}`,
     body: item.body,
   });
 };
@@ -130,6 +142,24 @@ export const listenTrayActions = async (handlers: {
   return () => {
     disposeOpen();
     disposeToggle();
+  };
+};
+
+export const listenNotificationActions = async (
+  handler: (payload: NotificationActionPayload) => void,
+) => {
+  if (!isTauriApp) {
+    return () => {};
+  }
+
+  const dispose = await listen<NotificationActionPayload>('studyflow-notification-action', (event) => {
+    if (event.payload) {
+      handler(event.payload);
+    }
+  });
+
+  return () => {
+    dispose();
   };
 };
 

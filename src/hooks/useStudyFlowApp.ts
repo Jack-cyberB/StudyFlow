@@ -11,6 +11,7 @@ import dayjs from 'dayjs';
 
 import {
   applyScheduleToDate,
+  autoCompleteExpiredSessions,
   buildExportRows,
   buildNotificationPlan,
   buildStatsSeries,
@@ -27,6 +28,7 @@ import {
   getSummaryMetrics,
   getTemplateForWeekday,
   getWeekdayLabel,
+  markEventCompletedForDate,
   normalizeState,
   removeEventFromDate,
   removeTemplateEvent,
@@ -46,6 +48,7 @@ import {
   exportCsvFile,
   getNotificationPermission,
   importBackupFile,
+  listenNotificationActions,
   listenTrayActions,
   loadPersistedState,
   persistPlatformState,
@@ -130,6 +133,22 @@ export function useStudyFlowApp() {
     await showPlatformError(title, description);
   });
 
+  const getEventTitle = useEffectEvent((eventId: string, date: string) => {
+    return deriveScheduleForDate(stateRef.current, date, dayjs()).find((event) => event.id === eventId)?.title ?? '学习任务';
+  });
+
+  const reconcileRunningSessions = useEffectEvent((referenceNow = dayjs()) => {
+    const nextState = autoCompleteExpiredSessions(stateRef.current, referenceNow);
+    if (nextState === stateRef.current) {
+      return;
+    }
+
+    stateRef.current = nextState;
+    setState(nextState);
+    void persistState(nextState);
+    showFeedback('已自动结束超时的学习计时');
+  });
+
   const persistState = useEffectEvent(async (payload: PersistedState) => {
     try {
       await persistPlatformState(payload);
@@ -160,7 +179,12 @@ export function useStudyFlowApp() {
     try {
       const initial = await loadPersistedState();
       stateRef.current = initial;
-      setState(initial);
+      const reconciled = autoCompleteExpiredSessions(initial, dayjs());
+      stateRef.current = reconciled;
+      setState(reconciled);
+      if (reconciled !== initial) {
+        await persistPlatformState(reconciled);
+      }
       setSelectedWeekday(dayjs().day() as Weekday);
       setLoading(false);
       setFeedback('StudyFlow 已就绪');
@@ -186,6 +210,10 @@ export function useStudyFlowApp() {
   }, []);
 
   useEffect(() => {
+    reconcileRunningSessions(now);
+  }, [now]);
+
+  useEffect(() => {
     let dispose = () => {};
 
     const attach = async () => {
@@ -204,6 +232,73 @@ export function useStudyFlowApp() {
             return next;
           });
         },
+      });
+    };
+
+    void attach();
+    return () => dispose();
+  }, []);
+
+  useEffect(() => {
+    let dispose = () => {};
+
+    const attach = async () => {
+      dispose = await listenNotificationActions((payload) => {
+        if (!payload.eventId || !payload.date) {
+          if (payload.action === 'open') {
+            startTransition(() => {
+              setView('today');
+              setSelectedDate(getDefaultDate());
+            });
+          }
+          return;
+        }
+
+        const title = getEventTitle(payload.eventId, payload.date);
+
+        if (payload.action === 'open') {
+          startTransition(() => {
+            setView('today');
+            setSelectedDate(payload.date!);
+          });
+          showFeedback(`已打开 ${title}`);
+          return;
+        }
+
+        if (payload.action === 'complete') {
+          commitState(
+            (current) => markEventCompletedForDate(current, payload.eventId!, payload.date!, dayjs()),
+            `${title} 已完成`,
+          );
+          return;
+        }
+
+        const minutes =
+          payload.action === 'delay'
+            ? (payload.minutes ?? 10)
+            : (() => {
+                const input = window.prompt('请输入要延迟的分钟数', '10');
+                if (input === null) {
+                  return null;
+                }
+
+                const parsed = Number.parseInt(input.trim(), 10);
+                if (!Number.isFinite(parsed) || parsed <= 0) {
+                  showFeedback('请输入大于 0 的整数分钟');
+                  return null;
+                }
+
+                return parsed;
+              })();
+
+        if (!minutes) {
+          return;
+        }
+
+        commitState(
+          (current) => delayEventForDate(current, payload.date!, payload.eventId!, minutes),
+          `${title} 已延迟 ${minutes} 分钟`,
+        );
       });
     };
 
@@ -244,7 +339,10 @@ export function useStudyFlowApp() {
           }
 
           deliveredNotificationsRef.current.add(item.id);
-          deliverNotification(item);
+          void deliverNotification(item).catch((error) => {
+            deliveredNotificationsRef.current.delete(item.id);
+            showFeedback(`提醒发送失败：${String(error)}`);
+          });
         }, delay);
 
         notificationTimeoutsRef.current.push(timer);
@@ -455,4 +553,4 @@ export function useStudyFlowApp() {
   };
 }
 
-export { completeSessionForEvent, delayEventForDate, startSessionForEvent, skipEventForDate };
+export { completeSessionForEvent, delayEventForDate, markEventCompletedForDate, startSessionForEvent, skipEventForDate };

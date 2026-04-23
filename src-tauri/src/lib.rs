@@ -10,6 +10,9 @@ use tauri::{
     AppHandle, Emitter, Manager, State, WindowEvent,
 };
 
+#[cfg(target_os = "windows")]
+use tauri_winrt_notification::{Duration as ToastDuration, Sound, Toast};
+
 #[derive(Default)]
 struct RuntimeState {
     minimize_to_tray: Mutex<bool>,
@@ -104,6 +107,31 @@ struct StatsExportRow {
     planned_minutes: i64,
     actual_minutes: i64,
     status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationPayload {
+    id: i64,
+    title: String,
+    body: String,
+    event_id: String,
+    date: String,
+    reminder_kind: String,
+    reminder_label: String,
+    subject: String,
+    event_title: String,
+    start_time: String,
+    end_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationActionPayload {
+    action: String,
+    event_id: Option<String>,
+    date: Option<String>,
+    minutes: Option<i64>,
 }
 
 fn default_reminder_policy() -> ReminderPolicy {
@@ -320,6 +348,51 @@ fn read_backup_payload(raw: &str) -> Result<PersistedState> {
     Ok(payload)
 }
 
+fn parse_notification_action(raw: Option<String>, payload: &NotificationPayload) -> NotificationActionPayload {
+    let Some(raw) = raw else {
+        return NotificationActionPayload {
+            action: "open".into(),
+            event_id: Some(payload.event_id.clone()),
+            date: Some(payload.date.clone()),
+            minutes: None,
+        };
+    };
+
+    let parts = raw.split('|').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["complete", event_id, date] => NotificationActionPayload {
+            action: "complete".into(),
+            event_id: Some((*event_id).to_string()),
+            date: Some((*date).to_string()),
+            minutes: None,
+        },
+        ["delay", minutes, event_id, date] => NotificationActionPayload {
+            action: "delay".into(),
+            event_id: Some((*event_id).to_string()),
+            date: Some((*date).to_string()),
+            minutes: minutes.parse::<i64>().ok(),
+        },
+        ["custom-delay", event_id, date] => NotificationActionPayload {
+            action: "customDelay".into(),
+            event_id: Some((*event_id).to_string()),
+            date: Some((*date).to_string()),
+            minutes: None,
+        },
+        ["open", event_id, date] => NotificationActionPayload {
+            action: "open".into(),
+            event_id: Some((*event_id).to_string()),
+            date: Some((*date).to_string()),
+            minutes: None,
+        },
+        _ => NotificationActionPayload {
+            action: "open".into(),
+            event_id: Some(payload.event_id.clone()),
+            date: Some(payload.date.clone()),
+            minutes: None,
+        },
+    }
+}
+
 #[tauri::command]
 fn load_state(app: AppHandle) -> Result<PersistedState, String> {
     let conn = connect(&app).map_err(|error| error.to_string())?;
@@ -399,6 +472,64 @@ fn export_csv(file_path: String, rows: Vec<StatsExportRow>) -> Result<String, St
     Ok(file_path)
 }
 
+#[tauri::command]
+fn show_studyflow_notification(app: AppHandle, payload: NotificationPayload) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let build_toast = |app_id: &str, app_handle: AppHandle, payload: NotificationPayload| {
+            let title = payload.title.clone();
+            let body = payload.body.clone();
+            let event_id = payload.event_id.clone();
+            let date = payload.date.clone();
+
+            Toast::new(app_id)
+                .title("StudyFlow 学习提醒")
+                .text1(&title)
+                .text2(&body)
+                .duration(ToastDuration::Long)
+                .sound(Some(Sound::Reminder))
+                .add_button(
+                    "完成学习",
+                    &format!("complete|{}|{}", &event_id, &date),
+                )
+                .add_button(
+                    "延迟 10 分钟",
+                    &format!("delay|10|{}|{}", &event_id, &date),
+                )
+                .add_button(
+                    "自定义延迟",
+                    &format!("custom-delay|{}|{}", &event_id, &date),
+                )
+                .on_activated(move |arguments| {
+                    let action = parse_notification_action(arguments, &payload);
+                    if action.action == "open" || action.action == "customDelay" {
+                        show_main_window(&app_handle);
+                    }
+                    let _ = app_handle.emit("studyflow-notification-action", action);
+                    Ok(())
+                })
+        };
+
+        let app_id = app.config().identifier.clone();
+        let primary = build_toast(&app_id, app.clone(), payload.clone());
+        if primary.show().is_ok() {
+            return Ok(());
+        }
+
+        build_toast(Toast::POWERSHELL_APP_ID, app, payload)
+            .show()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        let _ = payload;
+        Err("StudyFlow interactive notifications are only available on Windows".into())
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(RuntimeState::default())
@@ -463,7 +594,8 @@ pub fn run() {
             persist_state,
             export_backup,
             import_backup,
-            export_csv
+            export_csv,
+            show_studyflow_notification
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

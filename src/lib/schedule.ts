@@ -53,6 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const APP_SCHEMA_VERSION = 1;
+const AUTO_COMPLETE_GRACE_MINUTES = 10;
 
 const createId = () =>
   globalThis.crypto?.randomUUID?.() ??
@@ -227,6 +228,11 @@ const getSessionsForEventOnDate = (sessions: StudySession[], eventId: string, da
   sessions
     .filter((session) => session.eventId === eventId && session.date === date)
     .sort((left, right) => left.actualStart.localeCompare(right.actualStart));
+
+const getEventEndAt = (state: PersistedState, eventId: string, date: string) => {
+  const occurrence = deriveScheduleForDate(state, date).find((event) => event.id === eventId);
+  return occurrence ? dayjs(`${date}T${occurrence.endTime}:00`) : null;
+};
 
 const getLatestSessionForEvent = (sessions: StudySession[], eventId: string, date: string) =>
   getSessionsForEventOnDate(sessions, eventId, date).at(-1);
@@ -527,14 +533,17 @@ export const startSessionForEvent = (
   now = dayjs(),
 ) => {
   const currentSessions = state.sessions.map((session) => {
-    if (session.date !== date || session.status !== 'running' || session.eventId === event.id) {
+    if (session.status !== 'running' || (session.eventId === event.id && session.date === date)) {
       return session;
     }
 
+    const eventEndAt = getEventEndAt(state, session.eventId, session.date);
+    const effectiveEnd = eventEndAt && eventEndAt.isBefore(now) ? eventEndAt : now;
+
     return {
       ...session,
-      actualEnd: now.toISOString(),
-      durationMinutes: getSessionActualMinutes(session, now),
+      actualEnd: effectiveEnd.toISOString(),
+      durationMinutes: Math.max(0, effectiveEnd.diff(dayjs(session.actualStart), 'minute')),
       status: 'completed' as const,
     };
   });
@@ -562,6 +571,36 @@ export const startSessionForEvent = (
       },
     ],
   });
+};
+
+export const autoCompleteExpiredSessions = (state: PersistedState, now = dayjs()) => {
+  let changed = false;
+
+  const sessions = state.sessions.map((session) => {
+    if (session.status !== 'running') {
+      return session;
+    }
+
+    const eventEndAt = getEventEndAt(state, session.eventId, session.date);
+    if (!eventEndAt || now.isBefore(eventEndAt.add(AUTO_COMPLETE_GRACE_MINUTES, 'minute'))) {
+      return session;
+    }
+
+    changed = true;
+    return {
+      ...session,
+      actualEnd: eventEndAt.toISOString(),
+      durationMinutes: Math.max(0, eventEndAt.diff(dayjs(session.actualStart), 'minute')),
+      status: 'completed' as const,
+    };
+  });
+
+  return changed
+    ? normalizeState({
+        ...state,
+        sessions,
+      })
+    : state;
 };
 
 export const completeSessionForEvent = (
@@ -593,6 +632,42 @@ export const completeSessionForEvent = (
         sessions,
       })
     : state;
+};
+
+export const markEventCompletedForDate = (
+  state: PersistedState,
+  eventId: string,
+  date: string,
+  now = dayjs(),
+) => {
+  const occurrence = deriveScheduleForDate(state, date, now).find((event) => event.id === eventId);
+  if (!occurrence || occurrence.status === 'completed') {
+    return state;
+  }
+
+  const hasRunning = Boolean(
+    state.sessions.find((session) => session.eventId === eventId && session.date === date && session.status === 'running'),
+  );
+
+  if (hasRunning) {
+    return completeSessionForEvent(state, eventId, date, 'completed', now);
+  }
+
+  return normalizeState({
+    ...state,
+    sessions: [
+      ...state.sessions,
+      {
+        id: createId(),
+        eventId,
+        date,
+        actualStart: now.subtract(occurrence.plannedMinutes, 'minute').toISOString(),
+        actualEnd: now.toISOString(),
+        durationMinutes: occurrence.plannedMinutes,
+        status: 'completed',
+      },
+    ],
+  });
 };
 
 export const skipEventForDate = (state: PersistedState, eventId: string, date: string, now = dayjs()) => {
@@ -709,7 +784,7 @@ const buildReminderMoments = (event: ScheduleOccurrence) => {
   const { effectiveReminder } = event;
   const start = dayjs(`${event.date}T${event.startTime}:00`);
   const end = dayjs(`${event.date}T${event.endTime}:00`);
-  const reminders: Array<{ key: string; label: string; when: Dayjs }> = [];
+  const reminders: Array<{ key: string; kind: 'before' | 'start' | 'end'; label: string; when: Dayjs }> = [];
 
   if (effectiveReminder.mode === 'off') {
     return reminders;
@@ -719,6 +794,7 @@ const buildReminderMoments = (event: ScheduleOccurrence) => {
     effectiveReminder.beforeMinutes.forEach((minutes) => {
       reminders.push({
         key: `before-${minutes}`,
+        kind: 'before',
         label: `${minutes} 分钟后开始`,
         when: start.subtract(minutes, 'minute'),
       });
@@ -732,6 +808,7 @@ const buildReminderMoments = (event: ScheduleOccurrence) => {
   ) {
     reminders.push({
       key: 'start',
+      kind: 'start',
       label: '现在开始',
       when: start,
     });
@@ -740,6 +817,7 @@ const buildReminderMoments = (event: ScheduleOccurrence) => {
   if (effectiveReminder.mode === 'end' || effectiveReminder.mode === 'combo' || effectiveReminder.notifyAtEnd) {
     reminders.push({
       key: 'end',
+      kind: 'end',
       label: '现在结束',
       when: end,
     });
@@ -782,8 +860,16 @@ export const buildNotificationPlan = (
         notifications.push({
           id: hashToInt(`${event.id}-${date}-${reminder.key}-${reminder.when.toISOString()}`),
           title: `${event.subject} · ${event.title}`,
-          body: `${reminder.label}｜${event.startTime} - ${event.endTime}`,
+          body: `${reminder.label} · ${event.startTime} - ${event.endTime}`,
           when: reminder.when.toDate(),
+          eventId: event.id,
+          date,
+          reminderKind: reminder.kind,
+          reminderLabel: reminder.label,
+          subject: event.subject,
+          eventTitle: event.title,
+          startTime: event.startTime,
+          endTime: event.endTime,
         });
       });
     });

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyScheduleToDate,
+  autoCompleteExpiredSessions,
   buildNotificationPlan,
   buildExportRows,
   createEvent,
@@ -106,6 +107,34 @@ describe('schedule helpers', () => {
     expect(rows[0].plannedMinutes).toBe(60);
     expect(rows[0].actualMinutes).toBe(45);
     expect(rows[0].status).toBe('completed');
+  });
+
+  it('waits 10 minutes after the scheduled end time before auto-completing a running session', () => {
+    const event = makeEvent();
+    const state = makeStateWithTemplate(event);
+    const started = startSessionForEvent(state, event, MONDAY_DATE, dayjs(`${MONDAY_DATE}T09:00:00`));
+
+    const stillRunning = autoCompleteExpiredSessions(started, dayjs(`${MONDAY_DATE}T10:09:00`));
+    const reconciled = autoCompleteExpiredSessions(started, dayjs(`${MONDAY_DATE}T10:10:00`));
+
+    expect(stillRunning.sessions[0].status).toBe('running');
+    expect(reconciled.sessions).toHaveLength(1);
+    expect(reconciled.sessions[0].status).toBe('completed');
+    expect(reconciled.sessions[0].durationMinutes).toBe(60);
+    expect(reconciled.sessions[0].actualEnd).toContain('2026-04-20T02:00:00.000Z');
+  });
+
+  it('starting a new study block closes any other running block first', () => {
+    const first = makeEvent({ title: '数学', startTime: '09:00', endTime: '10:00' });
+    const second = makeEvent({ title: '英语', startTime: '10:00', endTime: '11:00' });
+    const state = makeStateWithTemplate(first, second);
+
+    const firstStarted = startSessionForEvent(state, first, MONDAY_DATE, dayjs(`${MONDAY_DATE}T09:10:00`));
+    const secondStarted = startSessionForEvent(firstStarted, second, MONDAY_DATE, dayjs(`${MONDAY_DATE}T10:05:00`));
+
+    expect(secondStarted.sessions.filter((session) => session.status === 'running')).toHaveLength(1);
+    expect(secondStarted.sessions.find((session) => session.eventId === first.id)?.status).toBe('completed');
+    expect(secondStarted.sessions.find((session) => session.eventId === first.id)?.durationMinutes).toBe(50);
   });
 
   it('upserts template events into the matching weekday only', () => {

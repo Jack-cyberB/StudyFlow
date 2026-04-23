@@ -9,9 +9,10 @@ const mockedPlatform = vi.hoisted(() => ({
   loadPersistedState: vi.fn<() => Promise<PersistedState>>(),
   persistPlatformState: vi.fn<() => Promise<void>>(),
   listenTrayActions: vi.fn<() => Promise<() => void>>(),
+  listenNotificationActions: vi.fn<() => Promise<() => void>>(),
   getNotificationPermission: vi.fn<() => Promise<boolean>>(),
   ensureNotificationPermission: vi.fn<() => Promise<boolean>>(),
-  deliverNotification: vi.fn(),
+  deliverNotification: vi.fn<() => Promise<void>>(),
   exportBackupFile: vi.fn<() => Promise<string | null>>(),
   importBackupFile: vi.fn<() => Promise<PersistedState | null>>(),
   exportCsvFile: vi.fn<() => Promise<string | null>>(),
@@ -69,6 +70,7 @@ describe('App UI', () => {
     mockedPlatform.loadPersistedState.mockResolvedValue(buildState());
     mockedPlatform.persistPlatformState.mockResolvedValue();
     mockedPlatform.listenTrayActions.mockResolvedValue(() => {});
+    mockedPlatform.listenNotificationActions.mockResolvedValue(() => {});
     mockedPlatform.getNotificationPermission.mockResolvedValue(false);
     mockedPlatform.ensureNotificationPermission.mockResolvedValue(false);
     mockedPlatform.exportBackupFile.mockResolvedValue(null);

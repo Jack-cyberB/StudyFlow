@@ -109,4 +109,12 @@ export interface NotificationPlanItem {
   title: string;
   body: string;
   when: Date;
+  eventId: string;
+  date: string;
+  reminderKind: 'before' | 'start' | 'end';
+  reminderLabel: string;
+  subject: string;
+  eventTitle: string;
+  startTime: string;
+  endTime: string;
 }
