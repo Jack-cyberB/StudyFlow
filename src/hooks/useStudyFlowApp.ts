@@ -178,7 +178,7 @@ export function useStudyFlowApp() {
       window.clearTimeout(feedbackTimerRef.current);
       notificationTimeoutsRef.current.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [loadApp]);
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(dayjs()), 60_000);
@@ -209,7 +209,7 @@ export function useStudyFlowApp() {
 
     void attach();
     return () => dispose();
-  }, [showFeedback]);
+  }, []);
 
   const syncNotifications = useEffectEvent(async () => {
     if (loading) {
@@ -256,7 +256,7 @@ export function useStudyFlowApp() {
 
   useEffect(() => {
     void syncNotifications();
-  }, [state, notificationsPaused, todayKey, loading, syncNotifications]);
+  }, [state, notificationsPaused, todayKey, loading]);
 
   const openWeeklyEditor = (event?: ScheduleEvent) => {
     const draft = event ? createEvent(event) : buildDraftEvent(selectedTemplate.events);
