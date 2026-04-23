@@ -139,12 +139,17 @@ export function useStudyFlowApp() {
   });
 
   const commitState = (updater: (current: PersistedState) => PersistedState, notice?: string) => {
+    let nextState: PersistedState | null = null;
+
     setState((current) => {
-      const next = normalizeState(updater(current));
-      stateRef.current = next;
-      void persistState(next);
-      return next;
+      nextState = normalizeState(updater(current));
+      stateRef.current = nextState;
+      return nextState;
     });
+
+    if (nextState) {
+      void persistState(nextState);
+    }
 
     if (notice) {
       showFeedback(notice);

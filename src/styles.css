@@ -555,6 +555,18 @@ p {
   flex-wrap: wrap;
 }
 
+.weekday-tabs {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  width: 100%;
+}
+
+.weekday-tabs .weekday-pill {
+  width: 100%;
+  min-height: 42px;
+  justify-content: center;
+}
+
 .insight-list {
   margin: 0;
   padding: 0;
@@ -777,6 +789,10 @@ p {
   .compact-grid,
   .page-grid {
     grid-template-columns: 1fr;
+  }
+
+  .weekday-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .workspace,

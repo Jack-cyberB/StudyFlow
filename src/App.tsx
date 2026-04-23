@@ -18,6 +18,7 @@ import { TodayPage } from './pages/TodayPage';
 import { WeeklyPage } from './pages/WeeklyPage';
 import './styles.css';
 import type { ViewKey, Weekday } from './types';
+import { APP_VERSION } from './version';
 
 const VIEW_ITEMS: Array<{ key: ViewKey; label: string; caption: string }> = [
   { key: 'today', label: '今日', caption: '时间线与专注进度' },
@@ -36,7 +37,7 @@ function App() {
         <div className="brand-card">
           <img className="brand-mark" src="/favicon.svg" alt="StudyFlow 图标" />
           <div>
-            <p className="eyebrow">StudyFlow</p>
+            <p className="eyebrow">{`StudyFlow v${APP_VERSION}`}</p>
             <h1>学习日程桌面板</h1>
             <p className="muted">
               按星期布置固定节奏，再对当天做灵活修订。轻量、离线，适合长期挂在桌面。
@@ -175,7 +176,11 @@ function App() {
             template={app.selectedTemplate.events}
             copyTargets={app.copyTargets}
             settingsReminder={app.state.settings.defaultReminderPolicy}
-            onSelectWeekday={app.setSelectedWeekday}
+            onSelectWeekday={(weekday) => {
+              startTransition(() => {
+                app.setSelectedWeekday(weekday);
+              });
+            }}
             onOpenCreate={() => app.openWeeklyEditor()}
             onEdit={(event) => app.openWeeklyEditor(event)}
             onDelete={app.handleDeleteWeeklyEvent}
@@ -277,11 +282,7 @@ function App() {
       {app.editor ? (
         <EventEditorPanel
           key={`${app.editor.scope}-${app.editor.scope === 'weekly' ? app.editor.weekday : app.editor.date}-${app.editor.event.id}`}
-          title={
-            app.editor.scope === 'weekly'
-              ? `${getWeekdayLabel(app.editor.weekday)} 模板事件`
-              : `${app.editor.date} 临时事件`
-          }
+          title={app.editor.scope === 'weekly' ? `${getWeekdayLabel(app.editor.weekday)} 模板事件` : `${app.editor.date} 临时事件`}
           initialEvent={app.editor.event}
           globalReminder={app.state.settings.defaultReminderPolicy}
           onCancel={() => app.setEditor(null)}

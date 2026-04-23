@@ -45,7 +45,11 @@ export function WeeklyPage({
             <button
               key={item.value}
               type="button"
+              role="tab"
               className={clsx('weekday-pill', weekday === item.value && 'is-active')}
+              aria-pressed={weekday === item.value}
+              aria-selected={weekday === item.value}
+              aria-label={`查看${item.short}模板`}
               onClick={() => onSelectWeekday(item.value)}
             >
               {item.short}
@@ -82,7 +86,7 @@ export function WeeklyPage({
         ) : (
           <EmptyState
             title={`${getWeekdayLabel(weekday)} 还没有模板`}
-            description="为这个星期几建立稳定节奏，之后每天会自动生成日程。"
+            description="先为这一天建立固定安排，之后每周都会自动生成日程。"
             actionLabel="添加模板事件"
             onAction={onOpenCreate}
           />
@@ -104,6 +108,8 @@ export function WeeklyPage({
                 key={item.value}
                 type="button"
                 className={clsx('weekday-pill', copyTargets.includes(item.value) && 'is-active')}
+                aria-pressed={copyTargets.includes(item.value)}
+                aria-label={`复制到${item.short}`}
                 onClick={() => onToggleCopyTarget(item.value)}
               >
                 {item.short}

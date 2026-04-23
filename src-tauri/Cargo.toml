@@ -1,6 +1,6 @@
 [package]
 name = "studyflow"
-version = "1.0.0"
+version = "1.0.1"
 description = "StudyFlow desktop study scheduler built with Tauri, React, and SQLite."
 authors = ["Zhang"]
 license = "MIT"
